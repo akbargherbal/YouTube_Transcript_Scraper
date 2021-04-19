@@ -115,8 +115,8 @@ driver.implicitly_wait(10)
 driver.get(link)
 
 
-container_xpath = '//ytd-grid-renderer[@class="style-scope ytd-item-section-renderer"]'
-video_xpath = './/ytd-grid-video-renderer//div[@id="dismissable"]' # Notice it's relative!!
+container_xpath = '//ytd-grid-renderer[@class="style-scope ytd-item-section-renderer"]' # OK
+video_xpath = './/ytd-grid-video-renderer[@class="style-scope ytd-grid-renderer"]' # Notice it's relative! >> First Suspect when script crashes.
 title_xpath = './/h3[@class="style-scope ytd-grid-video-renderer"]/a[@id="video-title"]'
 link_xpath = './/h3[@class="style-scope ytd-grid-video-renderer"]/a'
 duration_xpath = './/h3[@class="style-scope ytd-grid-video-renderer"]/a'
@@ -142,8 +142,7 @@ vid_container = driver.find_elements_by_xpath(container_xpath)
 channel_name = driver.find_element_by_xpath(channel_name_xpath).text
 channel_name = re.sub(r'\s+', '_', channel_name)
 os.mkdir(channel_name)
-# x = driver.find_elements_by_xpath(video_xpath)
-# len(x)
+
 for n in range(numb_scrolls):
     driver.find_element_by_xpath('//body').send_keys(Keys.END)
     sleep(4)
@@ -178,9 +177,6 @@ print(f'Number of videos scraped {len(set_videos)}')
 print(f'Total duration of scraping is {duration_min} {time_unit}.')
 
 
-
-
-
 list_videos = list(set_videos)
 
 
@@ -189,11 +185,6 @@ df01 = pd.DataFrame(data={
     'LINK': [i[1] for i in list_videos],
     'DURATION': [i[2] for i in list_videos]
 })
-
-
-df01['DURATION'][0].split(' ago ')
-
-
 
 
 
@@ -295,7 +286,7 @@ def get_english_subs(x_list):
             transcript_list = YouTubeTranscriptApi.list_transcripts(vid_id)
             tra = transcript_list.find_transcript(['en'])
             subs = tra.fetch()
-            success_list.append(subs)
+            success_list.append((vid_id, subs)) # modified
             sleep(3)
 
         except:
@@ -320,40 +311,41 @@ def get_english_subs(x_list):
 list_cc = get_english_subs(youtube_vid_ids)
 
 
-len(list_cc)
+dict_vid_id_title = dict(df01['VID_ID TITLE'.split()].values.tolist())
+dict_vid_id_link = dict(df01['VID_ID LINK'.split()].values.tolist())
 
 
 new_cc = []
 counter = 1
 for i in list_cc:
-    for j in i:
-        new_cc.append((counter,j))
+    new_cc.append((counter,i)) # modified
     counter +=1
 
 
 df_subs = pd.DataFrame(data={'ID': [i[0] for i in new_cc],
-                  'DUMMY': [i[1] for i in new_cc]})
+                  'DUMMY': [i for i in new_cc]}) # modified
 
 
-df_subs['TEXT'] = df_subs['DUMMY'].apply(lambda x: x['text'])
+df_subs['VID_ID'] = df_subs['DUMMY'].apply(lambda x: x[1])
+df_subs['VID_ID'] = df_subs['VID_ID'].apply(lambda x: x[0])
+
+df_subs['LINK'] = df_subs['VID_ID'].apply(lambda x: dict_vid_id_link[x])
+df_subs['TITLE'] = df_subs['VID_ID'].apply(lambda x: dict_vid_id_title[x])
+
+df_subs['DUMMY_2'] = df_subs['DUMMY'].apply(lambda x: x[1])
+df_subs['DUMMY_2'] = df_subs['DUMMY_2'].apply(lambda x: x[1])
+
+df_subs = df_subs.explode('DUMMY_2').reset_index(drop=True)
+df_subs['TEXT'] = df_subs['DUMMY_2'].apply(lambda x: x['text'])
+df_subs['START'] = df_subs['DUMMY_2'].apply(lambda x: x['start'])
+df_subs['DURATION'] = df_subs['DUMMY_2'].apply(lambda x: x['duration'])
+
+df_subs = df_subs['ID	TEXT	START	DURATION LINK TITLE VID_ID'.split()]
+
+df_subs['MINUTE'] = df_subs['START'].apply(lambda x: int(x/60))
 
 
-
-
-
-df_subs['START'] = df_subs['DUMMY'].apply(lambda x: x['start'])
-
-
-df_subs['DURATION'] = df_subs['DUMMY'].apply(lambda x: x['duration'])
-
-
-df_subs = df_subs['ID	TEXT	START	DURATION'.split()]
-
-
-df_subs['MINUTE'] = df_subs['START'].apply(lambda x: int(round(x/60, 0)+1))
-
-
-grp_df_subs = df_subs.groupby(['ID', 'MINUTE']).agg({'TEXT': lambda x: ' '.join(x)})
+grp_df_subs = df_subs.groupby(['ID', 'MINUTE', 'LINK', 'TITLE']).agg({'TEXT': lambda x: ' '.join(x)})
 
 
 grp_df_subs = grp_df_subs.reset_index()
@@ -361,3 +353,5 @@ grp_df_subs = grp_df_subs.reset_index()
 
 # CREATE A FUNCTION THAT SAVES A PANDAS DATAFRAME! This is double work!
 save_df_pickle(grp_df_subs, f'{channel_name}_TRANSCRIPTS')
+print('_'*50)
+print(f'Save images & excel files to the following folder: {channel_name}')
